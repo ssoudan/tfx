@@ -46,11 +46,12 @@ def _test_exec_node_task(node_id, pipeline_id, pipeline=None):
   return test_utils.create_exec_node_task(node_uid, pipeline=pipeline)
 
 
-def _test_cancel_node_task(node_id, pipeline_id):
+def _test_cancel_node_task(node_id, pipeline_id, cancelled_for_restart=False):
   node_uid = task_lib.NodeUid(
       pipeline_uid=task_lib.PipelineUid(pipeline_id=pipeline_id),
       node_id=node_id)
-  return task_lib.CancelNodeTask(node_uid=node_uid)
+  return task_lib.CancelNodeTask(
+      node_uid=node_uid, cancelled_for_restart=cancelled_for_restart)
 
 
 class _Collector:
@@ -105,10 +106,12 @@ class TaskManagerTest(test_utils.TfxTest):
     deployment_config.executor_specs['Trainer'].Pack(executor_spec)
     deployment_config.executor_specs['Transform'].Pack(executor_spec)
     deployment_config.executor_specs['Evaluator'].Pack(executor_spec)
+    deployment_config.executor_specs['Pusher'].Pack(executor_spec)
     pipeline = pipeline_pb2.Pipeline()
     pipeline.nodes.add().pipeline_node.node_info.id = 'Trainer'
     pipeline.nodes.add().pipeline_node.node_info.id = 'Transform'
     pipeline.nodes.add().pipeline_node.node_info.id = 'Evaluator'
+    pipeline.nodes.add().pipeline_node.node_info.id = 'Pusher'
     pipeline.pipeline_info.id = 'test-pipeline'
     pipeline.deployment_config.Pack(deployment_config)
 
@@ -137,7 +140,7 @@ class TaskManagerTest(test_utils.TfxTest):
         self._type_url,
         functools.partial(
             _FakeTaskScheduler,
-            block_nodes={'Trainer', 'Transform'},
+            block_nodes={'Trainer', 'Transform', 'Pusher'},
             collector=collector))
 
     task_queue = tq.TaskQueue()
@@ -157,25 +160,43 @@ class TaskManagerTest(test_utils.TfxTest):
           'Evaluator', 'test-pipeline', pipeline=self._pipeline)
       task_queue.enqueue(evaluator_exec_task)
       task_queue.enqueue(_test_cancel_node_task('Transform', 'test-pipeline'))
+      pusher_exec_task = _test_exec_node_task(
+          'Pusher', 'test-pipeline', pipeline=self._pipeline)
+      task_queue.enqueue(pusher_exec_task)
+      task_queue.enqueue(
+          _test_cancel_node_task(
+              'Pusher', 'test-pipeline', cancelled_for_restart=True))
 
     self.assertTrue(task_manager.done())
     self.assertIsNone(task_manager.exception())
 
     # Ensure that all exec and cancellation tasks were processed correctly.
-    self.assertCountEqual(
-        [trainer_exec_task, transform_exec_task, evaluator_exec_task],
-        collector.scheduled_tasks)
-    self.assertCountEqual([trainer_exec_task, transform_exec_task],
-                          collector.cancelled_tasks)
-    mock_publish.assert_has_calls([
-        mock.call(
-            mlmd_handle=mock.ANY, task=trainer_exec_task, result=mock.ANY),
-        mock.call(
-            mlmd_handle=mock.ANY, task=transform_exec_task, result=mock.ANY),
-        mock.call(
-            mlmd_handle=mock.ANY, task=evaluator_exec_task, result=mock.ANY),
-    ],
-                                  any_order=True)
+    self.assertCountEqual([
+        trainer_exec_task,
+        transform_exec_task,
+        evaluator_exec_task,
+        pusher_exec_task,
+    ], collector.scheduled_tasks)
+    self.assertCountEqual([
+        trainer_exec_task,
+        transform_exec_task,
+        pusher_exec_task,
+    ], collector.cancelled_tasks)
+
+    mock_publish.assert_has_calls(
+        [
+            mock.call(
+                mlmd_handle=mock.ANY, task=trainer_exec_task, result=mock.ANY),
+            mock.call(
+                mlmd_handle=mock.ANY, task=transform_exec_task,
+                result=mock.ANY),
+            mock.call(
+                mlmd_handle=mock.ANY, task=evaluator_exec_task,
+                result=mock.ANY),
+            # It is expected that publish is not called for Pusher because it
+            # was cancelled for restart.
+        ],
+        any_order=True)
 
   @mock.patch.object(tm, '_publish_execution_results')
   def test_exceptions_are_surfaced(self, mock_publish):

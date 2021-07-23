@@ -207,6 +207,17 @@ def stop_node(
 
 
 @_to_status_not_ok_error
+def initiate_pipeline_update(
+    mlmd_handle: metadata.Metadata,
+    pipeline: pipeline_pb2.Pipeline) -> pstate.PipelineState:
+  """Initiates pipeline update."""
+  pipeline_uid = task_lib.PipelineUid.from_pipeline(pipeline)
+  with pstate.PipelineState.load(mlmd_handle, pipeline_uid) as pipeline_state:
+    pipeline_state.initiate_update(pipeline)
+  return pipeline_state
+
+
+@_to_status_not_ok_error
 def _wait_for_inactivation(
     mlmd_handle: metadata.Metadata,
     execution_id: metadata_store_pb2.Execution,
@@ -260,10 +271,13 @@ def orchestrate(mlmd_handle: metadata.Metadata, task_queue: tq.TaskQueue,
 
   active_pipeline_states = []
   stop_initiated_pipeline_states = []
+  update_initiated_pipeline_states = []
   for pipeline_state in pipeline_states:
     with pipeline_state:
-      if pipeline_state.stop_initiated_reason() is not None:
+      if pipeline_state.is_stop_initiated():
         stop_initiated_pipeline_states.append(pipeline_state)
+      elif pipeline_state.is_update_initiated():
+        update_initiated_pipeline_states.append(pipeline_state)
       elif pipeline_state.is_active():
         active_pipeline_states.append(pipeline_state)
       else:
@@ -277,6 +291,12 @@ def orchestrate(mlmd_handle: metadata.Metadata, task_queue: tq.TaskQueue,
                  pipeline_state.pipeline_uid)
     _orchestrate_stop_initiated_pipeline(mlmd_handle, task_queue,
                                          service_job_manager, pipeline_state)
+
+  for pipeline_state in update_initiated_pipeline_states:
+    logging.info('Orchestrating update-initiated pipeline: %s',
+                 pipeline_state.pipeline_uid)
+    _orchestrate_update_initiated_pipeline(task_queue, service_job_manager,
+                                           pipeline_state)
 
   for pipeline_state in active_pipeline_states:
     logging.info('Orchestrating pipeline: %s', pipeline_state.pipeline_uid)
@@ -308,7 +328,7 @@ def _orchestrate_stop_initiated_pipeline(
     mlmd_handle: metadata.Metadata, task_queue: tq.TaskQueue,
     service_job_manager: service_jobs.ServiceJobManager,
     pipeline_state: pstate.PipelineState) -> None:
-  """Orchestrates stop initiated pipeline."""
+  """Orchestrates a stop-initiated pipeline."""
   with pipeline_state:
     stop_reason = pipeline_state.stop_initiated_reason()
   assert stop_reason is not None
@@ -328,6 +348,34 @@ def _orchestrate_stop_initiated_pipeline(
     with pipeline_state:
       # Update pipeline execution state in MLMD.
       pipeline_state.set_pipeline_execution_state_from_status(stop_reason)
+
+
+def _orchestrate_update_initiated_pipeline(
+    task_queue: tq.TaskQueue,
+    service_job_manager: service_jobs.ServiceJobManager,
+    pipeline_state: pstate.PipelineState) -> None:
+  """Orchestrates an update-initiated pipeline."""
+  pipeline = pipeline_state.pipeline
+  has_exec_node_tasks = False
+  for node in pstate.get_all_pipeline_nodes(pipeline):
+    if service_job_manager.is_pure_service_node(pipeline_state,
+                                                node.node_info.id):
+      service_job_manager.stop_node_services(pipeline_state, node.node_info.id)
+      continue
+    exec_node_task_id = task_lib.exec_node_task_id_from_pipeline_node(
+        pipeline, node)
+    if task_queue.contains_task_id(exec_node_task_id):
+      task_queue.enqueue(
+          task_lib.CancelNodeTask(
+              node_uid=task_lib.NodeUid.from_pipeline_node(pipeline, node),
+              cancelled_for_restart=True))
+      has_exec_node_tasks = True
+    elif service_job_manager.is_mixed_service_node(pipeline_state,
+                                                   node.node_info.id):
+      service_job_manager.stop_node_services(pipeline_state, node.node_info.id)
+  if not has_exec_node_tasks:
+    with pipeline_state:
+      pipeline_state.apply_pipeline_update()
 
 
 def _orchestrate_active_pipeline(

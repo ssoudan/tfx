@@ -162,8 +162,10 @@ def get_cached_outputs(
   if not cached_executions:
     return None
   # Sorts the candidate executions from newer to older.
-  cached_executions = execution_lib.sort_executions_newest_to_oldest(
-      cached_executions)
+  cached_executions = sorted(
+      cached_executions,
+      key=lambda e: e.last_update_time_since_epoch,
+      reverse=True)
 
   # Defensively traverses candidate executions and returns once we find an
   # execution with valid outputs.
