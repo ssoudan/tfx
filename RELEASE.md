@@ -1,10 +1,7 @@
 # Current Version (Still in Development)
 
 ## Major Features and Improvements
-
-*  Added RuntimeParam support for Trainer's custom_config.
-*  TFX Trainer and Pusher now support Vertex, which can be enabled with
-   `ENABLE_VERTEX_KEY` key in `custom_config`.
+*   Added RuntimeParam support for Trainer's custom_config.
 
 ## Breaking Changes
 
@@ -22,7 +19,6 @@
 *   `CsvToExample` now supports multi-line strings.
 *   `tfx.benchmarks` package was removed from the Python TFX wheel. This package
     is used only for benchmarking and not useful for end users.
-*   Fixed the issue for fairness_indicator_thresholds support of Evaluator.
 
 ## Documentation Updates
 
@@ -54,6 +50,8 @@
 *  Placeholders support accessing artifact property and custom property.
 *  Removed the extra node information in IR for KubeflowDagRunner, to reduce
    size of generated IR.
+*  TFX Trainer and Pusher now support Vertex, which can be enabled with
+   `ENABLE_VERTEX_KEY` key in `custom_config`.
 
 
 ## Breaking Changes

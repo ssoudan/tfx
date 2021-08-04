@@ -18,7 +18,6 @@ import threading
 import time
 from typing import Dict, List, Mapping, Optional
 
-import attr
 from tfx import types
 from tfx.orchestration import data_types_utils
 from tfx.orchestration import metadata
@@ -27,7 +26,6 @@ from tfx.orchestration.experimental.core import task as task_lib
 from tfx.orchestration.portable.mlmd import context_lib
 from tfx.orchestration.portable.mlmd import execution_lib
 from tfx.proto.orchestration import pipeline_pb2
-from tfx.utils import json_utils
 from tfx.utils import status as status_lib
 
 from ml_metadata.proto import metadata_store_pb2
@@ -38,28 +36,16 @@ _STOP_INITIATED = 'stop_initiated'
 _PIPELINE_RUN_ID = 'pipeline_run_id'
 _PIPELINE_STATUS_CODE = 'pipeline_status_code'
 _PIPELINE_STATUS_MSG = 'pipeline_status_msg'
-_NODE_STATES = 'node_states'
-_PIPELINE_RUN_METADATA = 'pipeline_run_metadata'
+_NODE_STOP_INITIATED_PREFIX = 'node_stop_initiated_'
+_NODE_STATUS_CODE_PREFIX = 'node_status_code_'
+_NODE_STATUS_MSG_PREFIX = 'node_status_msg_'
+_PIPELINE_RUN_METADATA_PREFIX = 'pipeline_run_metadata_'
 _ORCHESTRATOR_EXECUTION_TYPE = metadata_store_pb2.ExecutionType(
     name=_ORCHESTRATOR_RESERVED_ID,
     properties={_PIPELINE_IR: metadata_store_pb2.STRING})
 
 _last_state_change_time_secs = -1.0
 _state_change_time_lock = threading.Lock()
-
-
-@attr.s(auto_attribs=True, kw_only=True)
-class _NodeState(json_utils.Jsonable):
-  """Records node state.
-
-  Attributes:
-    stop_initiated: Whether node stop has been initiated.
-    status_code: Status code for a stop initiated node.
-    status_msg: Status message for a stop initiated node.
-  """
-  stop_initiated: bool = False
-  status_code: Optional[int] = None
-  status_msg: str = ''
 
 
 def record_state_change_time() -> None:
@@ -150,8 +136,8 @@ class PipelineState:
             base64.b64encode(pipeline.SerializeToString()).decode('utf-8')
     }
     if pipeline_run_metadata:
-      exec_properties[_PIPELINE_RUN_METADATA] = json_utils.dumps(
-          pipeline_run_metadata)
+      for key, value in pipeline_run_metadata.items():
+        exec_properties[f'{_PIPELINE_RUN_METADATA_PREFIX}{key}'] = value
 
     execution = execution_lib.prepare_execution(
         mlmd_handle,
@@ -267,14 +253,13 @@ class PipelineState:
           code=status_lib.Code.INVALID_ARGUMENT,
           message=(f'Node given by uid {node_uid} does not belong to pipeline '
                    f'given by uid {self.pipeline_uid}'))
-    node_states_dict = self._get_node_states_dict()
-    node_state = node_states_dict.get(node_uid.node_id)
-    if node_state and node_state.stop_initiated:
-      node_state.status_code = None
-      node_state.status_msg = ''
-      node_state.stop_initiated = False
-      self._save_node_states_dict(node_states_dict)
-      record_state_change_time()
+    if self._execution.custom_properties.pop(
+        _node_stop_initiated_property(node_uid), None) is not None:
+      self._execution.custom_properties.pop(
+          _node_status_code_property(node_uid), None)
+      self._execution.custom_properties.pop(
+          _node_status_msg_property(node_uid), None)
+    record_state_change_time()
 
   def initiate_node_stop(self, node_uid: task_lib.NodeUid,
                          status: status_lib.Status) -> None:
@@ -289,13 +274,16 @@ class PipelineState:
           code=status_lib.Code.INVALID_ARGUMENT,
           message=(f'Node given by uid {node_uid} does not belong to pipeline '
                    f'given by uid {self.pipeline_uid}'))
-    node_states_dict = self._get_node_states_dict()
-    node_state = node_states_dict.get(node_uid.node_id, _NodeState())
-    node_state.stop_initiated = True
-    node_state.status_code = status.code
-    node_state.status_msg = status.message
-    node_states_dict[node_uid.node_id] = node_state
-    self._save_node_states_dict(node_states_dict)
+    data_types_utils.set_metadata_value(
+        self._execution.custom_properties[_node_stop_initiated_property(
+            node_uid)], 1)
+    data_types_utils.set_metadata_value(
+        self._execution.custom_properties[_node_status_code_property(node_uid)],
+        int(status.code))
+    if status.message:
+      data_types_utils.set_metadata_value(
+          self._execution.custom_properties[_node_status_msg_property(
+              node_uid)], status.message)
     record_state_change_time()
 
   def node_stop_initiated_reason(
@@ -306,13 +294,18 @@ class PipelineState:
       raise RuntimeError(
           f'Node given by uid {node_uid} does not belong to pipeline given '
           f'by uid {self.pipeline_uid}')
-    node_states_dict = self._get_node_states_dict()
-    node_state = node_states_dict.get(node_uid.node_id)
-    if node_state and node_state.stop_initiated:
-      return status_lib.Status(
-          code=node_state.status_code or status_lib.Code.UNKNOWN,
-          message=node_state.status_msg)
-    return None
+    custom_properties = self._execution.custom_properties
+    if _get_metadata_value(
+        custom_properties.get(_node_stop_initiated_property(node_uid))) == 1:
+      code = _get_metadata_value(
+          custom_properties.get(_node_status_code_property(node_uid)))
+      if code is None:
+        code = status_lib.Code.UNKNOWN
+      message = _get_metadata_value(
+          custom_properties.get(_node_status_msg_property(node_uid)))
+      return status_lib.Status(code=code, message=message)
+    else:
+      return None
 
   def get_pipeline_execution_state(self) -> metadata_store_pb2.Execution.State:
     """Returns state of underlying pipeline execution."""
@@ -347,16 +340,6 @@ class PipelineState:
     self._check_context()
     if self._execution.custom_properties.get(property_key):
       del self._execution.custom_properties[property_key]
-
-  def _get_node_states_dict(self) -> Dict[str, _NodeState]:
-    node_states_json = _get_metadata_value(
-        self._execution.custom_properties.get(_NODE_STATES))
-    return json_utils.loads(node_states_json) if node_states_json else {}
-
-  def _save_node_states_dict(self, node_states: Dict[str, _NodeState]) -> None:
-    data_types_utils.set_metadata_value(
-        self._execution.custom_properties[_NODE_STATES],
-        json_utils.dumps(node_states))
 
   def __enter__(self) -> 'PipelineState':
     mlmd_execution_atomic_op_context = mlmd_state.mlmd_execution_atomic_op(
@@ -478,10 +461,11 @@ class PipelineView:
 
   @property
   def pipeline_run_metadata(self) -> Dict[str, types.Property]:
-    pipeline_run_metadata = _get_metadata_value(
-        self.execution.custom_properties.get(_PIPELINE_RUN_METADATA))
-    return json_utils.loads(
-        pipeline_run_metadata) if pipeline_run_metadata else {}
+    return data_types_utils.build_value_dict({
+        k.split(_PIPELINE_RUN_METADATA_PREFIX)[1]: v
+        for k, v in self.execution.custom_properties.items()
+        if k.startswith(_PIPELINE_RUN_METADATA_PREFIX)
+    })
 
 
 def get_orchestrator_contexts(
@@ -504,6 +488,18 @@ def pipeline_uid_from_orchestrator_context(
   pipeline_id = splits[0]
   key = splits[1] if len(splits) > 1 else ''
   return task_lib.PipelineUid(pipeline_id=pipeline_id, key=key)
+
+
+def _node_stop_initiated_property(node_uid: task_lib.NodeUid) -> str:
+  return f'{_NODE_STOP_INITIATED_PREFIX}{node_uid.node_id}'
+
+
+def _node_status_code_property(node_uid: task_lib.NodeUid) -> str:
+  return f'{_NODE_STATUS_CODE_PREFIX}{node_uid.node_id}'
+
+
+def _node_status_msg_property(node_uid: task_lib.NodeUid) -> str:
+  return f'{_NODE_STATUS_MSG_PREFIX}{node_uid.node_id}'
 
 
 def get_all_pipeline_nodes(

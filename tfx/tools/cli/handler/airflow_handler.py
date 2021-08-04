@@ -103,6 +103,8 @@ class AirflowHandler(base_handler.BaseHandler):
   def create_run(self) -> None:
     """Trigger DAG in Airflow."""
     pipeline_name = self.flags_dict[labels.PIPELINE_NAME]
+    runtime_parameter = self.flags_dict[labels.RUNTIME_PARAMETER]
+    unparsed_runtime_parameter = json.dumps(runtime_parameter)
 
     # Check if pipeline exists.
     self._check_pipeline_existence(pipeline_name)
@@ -111,7 +113,10 @@ class AirflowHandler(base_handler.BaseHandler):
     self._subprocess_call(['airflow', 'dags', 'unpause', pipeline_name])
 
     # Trigger DAG.
-    self._subprocess_call(['airflow', 'dags', 'trigger', pipeline_name])
+    self._subprocess_call([
+        'airflow', 'dags', 'trigger', '--conf', unparsed_runtime_parameter,
+        pipeline_name
+    ])
 
     click.echo('Run created for pipeline: ' + pipeline_name)
 

@@ -41,7 +41,6 @@ from tfx.types.standard_component_specs import EVAL_CONFIG_KEY
 from tfx.types.standard_component_specs import EVALUATION_KEY
 from tfx.types.standard_component_specs import EXAMPLE_SPLITS_KEY
 from tfx.types.standard_component_specs import EXAMPLES_KEY
-from tfx.types.standard_component_specs import FAIRNESS_INDICATOR_THRESHOLDS_KEY
 from tfx.types.standard_component_specs import FEATURE_SLICING_SPEC_KEY
 from tfx.types.standard_component_specs import MODEL_KEY
 from tfx.types.standard_component_specs import MODULE_PATH_KEY
@@ -117,8 +116,8 @@ class Executor(base_beam_executor.BaseBeamExecutor):
     self._log_startup(input_dict, output_dict, exec_properties)
 
     # Add fairness indicator metric callback if necessary.
-    fairness_indicator_thresholds = json_utils.loads(
-        exec_properties.get(FAIRNESS_INDICATOR_THRESHOLDS_KEY, 'null'))
+    fairness_indicator_thresholds = exec_properties.get(
+        'fairness_indicator_thresholds', None)
     add_metrics_callbacks = None
     if fairness_indicator_thresholds:
       add_metrics_callbacks = [

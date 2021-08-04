@@ -22,8 +22,8 @@ from tfx.utils import doc_controls
 class ResolverFunction:
   """ResolverFunction represents a traceable function of resolver operators.
 
-  ResolverFunction as a whole, takes an ArtifactMultiMap as an argument and
-  returns an ArtifactMultiMap.
+  ResolverFunction as a whole, takes an ArtifactMultimap as an argument and
+  returns ArtifactMultimap.
 
   Usage:
       @resolver_function

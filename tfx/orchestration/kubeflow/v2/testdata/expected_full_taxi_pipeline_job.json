@@ -303,9 +303,6 @@
             },
             "eval_config": {
               "type": "STRING"
-            },
-            "fairness_indicator_thresholds": {
-              "type": "STRING"
             }
           }
         }
@@ -703,13 +700,6 @@
                   }
                 },
                 "example_splits": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "null"
-                    }
-                  }
-                },
-                "fairness_indicator_thresholds": {
                   "runtimeValue": {
                     "constantValue": {
                       "stringValue": "null"
