@@ -34,6 +34,7 @@ from ml_metadata.proto import metadata_store_pb2
 class ResolvedInfo:
   contexts: List[metadata_store_pb2.Context]
   exec_properties: Dict[str, types.Property]
+  exec_properties_schema: Dict[str, pipeline_pb2.Value.Schema]
   input_artifacts: Optional[Dict[str, List[types.Artifact]]]
 
 
@@ -45,6 +46,8 @@ def _generate_task_from_execution(metadata_handler: metadata.Metadata,
   """Generates `ExecNodeTask` given execution."""
   contexts = metadata_handler.store.get_contexts_by_execution(execution.id)
   exec_properties = _extract_properties(execution)
+  exec_properties_schema = inputs_utils.resolve_parameter_schemas(
+      node_parameters=node.parameters)
   input_artifacts = execution_lib.get_artifacts_dict(
       metadata_handler, execution.id, metadata_store_pb2.Event.INPUT)
   outputs_resolver = outputs_utils.OutputsResolver(node, pipeline.pipeline_info,
@@ -57,6 +60,7 @@ def _generate_task_from_execution(metadata_handler: metadata.Metadata,
       execution_id=execution.id,
       contexts=contexts,
       exec_properties=exec_properties,
+      exec_properties_schema=exec_properties_schema,
       input_artifacts=input_artifacts,
       output_artifacts=output_artifacts,
       executor_output_uri=outputs_resolver.get_executor_output_uri(
@@ -138,6 +142,8 @@ def generate_resolved_info(metadata_handler: metadata.Metadata,
   # Resolve execution properties.
   exec_properties = inputs_utils.resolve_parameters(
       node_parameters=node.parameters)
+  exec_properties_schema = inputs_utils.resolve_parameters_schema(
+      node_parameters=node.parameters)
 
   # Resolve inputs.
   input_artifacts = inputs_utils.resolve_input_artifacts(
@@ -146,6 +152,7 @@ def generate_resolved_info(metadata_handler: metadata.Metadata,
   return ResolvedInfo(
       contexts=contexts,
       exec_properties=exec_properties,
+      exec_properties_schema=exec_properties_schema,
       input_artifacts=input_artifacts)
 
 

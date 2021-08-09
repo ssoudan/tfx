@@ -12,14 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Data types util shared for orchestration."""
-from typing import Dict, Iterable, List, Mapping, Optional, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Union, Type, Any
 
 from tfx import types
 from tfx.proto.orchestration import pipeline_pb2
 from tfx.types import artifact_utils
+from tfx.utils import json_utils
+from tfx.utils import proto_utils
 
 from ml_metadata.proto import metadata_store_pb2
 from ml_metadata.proto import metadata_store_service_pb2
+
+from google.protobuf import message
 
 
 def build_artifact_dict(
@@ -84,6 +88,40 @@ def build_metadata_value_dict(
       value.double_value = v
     else:
       raise RuntimeError('Unsupported type {} for key {}'.format(type(v), k))
+    result[k] = value
+  return result
+
+
+def build_parsed_value_dict(
+    value_dict: Mapping[str, metadata_store_pb2.Value],
+    schema_dict: Mapping[str, pipeline_pb2.Value.Schema]) -> Dict[str, Any]:
+  """Converts MLMD value into parsed (non-)primitive value dict."""
+
+  def parse_value(
+      value: str, value_type: pipeline_pb2.Value.Schema.ValueType
+  ) -> Union[message.Message, bool]:
+    if value_type.HasField('proto_metadata'):
+      return proto_utils.deserialize_proto_message(
+          value, value_type.proto_metadata.message_type,
+          value_type.proto_metadata.file_descriptors)
+    elif value_type.boolean_type:
+      return json_utils.loads(value)
+
+  result = {}
+  if not value_dict:
+    return result
+  for k, v in value_dict.items():
+    if v.HasField('string_value') and k in schema_dict:
+      schema = schema_dict[k]
+      value = v.string_value
+
+      if schema.container_type == pipeline_pb2.Value.Schema.ContainerType.LIST:
+        list_value = json_utils.loads(value)
+        value = [parse_value(val, schema.value_type) for val in list_value]
+      else:
+        value = parse_value(value, schema.value_type)
+    else:
+      value = getattr(v, v.WhichOneof('value'))
     result[k] = value
   return result
 
@@ -195,3 +233,62 @@ def set_metadata_value(
   else:
     raise ValueError('Unexpected type %s' % type(value))
   return metadata_value
+
+
+def set_parameter_value(
+    parameter_value: pipeline_pb2.Value,
+    value: types.Property,
+    property_type: Optional[Type] = None  # pylint: disable=g-bare-generic
+) -> pipeline_pb2.Value:
+  """Sets field value and schema based on tfx value.
+
+  Args:
+    parameter_value: A pipeline_pb2.Value message to be set.
+    value: The value of the property.
+    property_type: Optional. The type of the property.
+
+  Returns:
+    A pipeline_pb2.Value proto with field_value and schema filled based on input
+    property.
+
+  Raises:
+    ValueError: If value type is not supported.
+  """
+  if isinstance(value, int) and not isinstance(value, bool):
+    parameter_value.field_value.int_value = value
+  elif isinstance(value, float):
+    parameter_value.field_value.double_value = value
+  elif isinstance(value, str):
+    parameter_value.field_value.string_value = value
+
+    def set_value_type(value_type: Type, schema: pipeline_pb2.Value.Schema):  # pylint: disable=g-bare-generic
+      if issubclass(value_type, message.Message):
+        proto_metadata = schema.value_type.proto_metadata
+        proto_metadata.message_type = value_type.DESCRIPTOR.full_name
+        proto_utils.build_file_descriptor_set(value_type,
+                                              proto_metadata.file_descriptors)
+      elif value_type == bool:
+        schema.value_type.boolean_type = True
+
+    # Non-primitive types may be serialized. Check property_type to recover its
+    # type information.
+    if not property_type:
+      pass
+    elif property_type.__class__.__name__ in ('_GenericAlias', 'GenericMeta'):
+      if property_type.__origin__ in [List, list]:
+        parameter_value.schema.container_type = (
+            pipeline_pb2.Value.Schema.ContainerType.LIST)
+        list_value_type = property_type.__args__[0]
+        set_value_type(list_value_type, parameter_value.schema)
+      else:
+        raise ValueError('Serialized string has unexpected type %s' %
+                         property_type)
+    elif property_type == bool or issubclass(property_type, message.Message):
+      set_value_type(property_type, parameter_value.schema)
+    else:
+      raise ValueError('Serialized string has unexpected type %s' %
+                       property_type)
+  else:
+    raise ValueError('Unexpected type %s' % type(value))
+
+  return parameter_value

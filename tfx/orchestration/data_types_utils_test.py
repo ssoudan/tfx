@@ -13,19 +13,21 @@
 # limitations under the License.
 """Tests for tfx.orchestration.data_types_utils."""
 
-from absl.testing import parameterized
+from typing import Dict, List
 
+from absl.testing import parameterized
 import tensorflow as tf
 from tfx.orchestration import data_types_utils
 from tfx.proto.orchestration import pipeline_pb2
 from tfx.types import artifact_utils
+from tfx.utils import test_case_utils
 
 from google.protobuf import text_format
 from ml_metadata.proto import metadata_store_pb2
 from ml_metadata.proto import metadata_store_service_pb2
 
 
-class DataTypesUtilsTest(tf.test.TestCase, parameterized.TestCase):
+class DataTypesUtilsTest(test_case_utils.TfxTest, parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
@@ -102,6 +104,56 @@ class DataTypesUtilsTest(tf.test.TestCase, parameterized.TestCase):
     actual_metadata_value_dict = (
         data_types_utils.build_metadata_value_dict(self.value_dict))
     self.assertEqual(self.metadata_value_dict, actual_metadata_value_dict)
+
+  def testBuildParsedValueDict(self):
+    value_dict = {
+        'int_val':
+            metadata_store_pb2.Value(int_value=1),
+        'string_val':
+            metadata_store_pb2.Value(string_value='random str'),
+        'bool_val':
+            metadata_store_pb2.Value(string_value='false'),
+        'proto_val':
+            metadata_store_pb2.Value(string_value='{"string_value":"hello"}'),
+        'list_val':
+            metadata_store_pb2.Value(string_value='["false", "true"]')
+    }
+    bool_schema = text_format.Parse(
+        """
+          value_type {
+            boolean_type: True
+          }
+        """, pipeline_pb2.Value.Schema())
+    proto_schema = text_format.Parse(
+        """
+          value_type {
+            proto_metadata {
+              message_type: 'ml_metadata.Value'
+            }
+          }
+        """, pipeline_pb2.Value.Schema())
+    list_schema = text_format.Parse(
+        """
+          value_type {
+            boolean_type: True
+          }
+          container_type: LIST
+        """, pipeline_pb2.Value.Schema())
+    schema_dict = {
+        'bool_val': bool_schema,
+        'proto_val': proto_schema,
+        'list_val': list_schema
+    }
+    expected_parsed_dict = {
+        'int_val': 1,
+        'string_val': 'random str',
+        'bool_val': False,
+        'list_val': [False, True],
+        'proto_val': metadata_store_pb2.Value(string_value='hello')
+    }
+    self.assertEqual(
+        expected_parsed_dict,
+        data_types_utils.build_parsed_value_dict(value_dict, schema_dict))
 
   def testGetMetadataValueType(self):
     tfx_value = pipeline_pb2.Value()
@@ -184,6 +236,87 @@ class DataTypesUtilsTest(tf.test.TestCase, parameterized.TestCase):
     pb = metadata_store_pb2.Value()
     with self.assertRaises(ValueError):
       data_types_utils.set_metadata_value(pb, True)
+
+  def testSetParameterValue(self):
+    actual_int = pipeline_pb2.Value()
+    expected_int = text_format.Parse(
+        """
+          field_value {
+            int_value: 1
+          }
+        """, pipeline_pb2.Value())
+    self.assertEqual(expected_int,
+                     data_types_utils.set_parameter_value(actual_int, 1))
+
+    actual_str = pipeline_pb2.Value()
+    expected_str = text_format.Parse(
+        """
+          field_value {
+            string_value: 'hello'
+          }
+        """, pipeline_pb2.Value())
+    self.assertEqual(expected_str,
+                     data_types_utils.set_parameter_value(actual_str, 'hello'))
+
+    actual_bool = pipeline_pb2.Value()
+    expected_bool = text_format.Parse(
+        """
+          field_value {
+            string_value: 'true'
+          }
+          schema {
+            value_type {
+              boolean_type: True
+            }
+          }
+        """, pipeline_pb2.Value())
+    self.assertEqual(
+        expected_bool,
+        data_types_utils.set_parameter_value(actual_bool, 'true', bool))
+
+    actual_proto = pipeline_pb2.Value()
+    expected_proto = text_format.Parse(
+        """
+          field_value {
+            string_value: '{"string_value":"hello"}'
+          }
+          schema {
+            value_type {
+              proto_metadata {
+                message_type: 'ml_metadata.Value'
+              }
+            }
+          }
+        """, pipeline_pb2.Value())
+    data_types_utils.set_parameter_value(actual_proto,
+                                         '{"string_value":"hello"}',
+                                         metadata_store_pb2.Value)
+    actual_proto.schema.value_type.proto_metadata.ClearField('file_descriptors')
+    self.assertProtoPartiallyEquals(expected_proto, actual_proto)
+
+    actual_list = pipeline_pb2.Value()
+    expected_list = text_format.Parse(
+        """
+          field_value {
+            string_value: '["false", "true"]'
+          }
+          schema {
+            value_type {
+              boolean_type: True
+            }
+            container_type: LIST
+          }
+        """, pipeline_pb2.Value())
+    self.assertEqual(
+        expected_list,
+        data_types_utils.set_parameter_value(actual_list, '["false", "true"]',
+                                             List[bool]))
+
+  def testSetParameterValueUnsupportedType(self):
+    actual_value = pipeline_pb2.Value()
+    with self.assertRaises(ValueError):
+      data_types_utils.set_parameter_value(actual_value, '{"a": 1}', Dict[str,
+                                                                          int])
 
 
 if __name__ == '__main__':

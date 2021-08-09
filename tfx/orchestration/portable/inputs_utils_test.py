@@ -405,6 +405,37 @@ class InputsUtilsTest(test_case_utils.TfxTest, _TestMixin):
     self.assertIsInstance(result, inputs_utils.Trigger)
     self.assertArtifactMapListEqual([{'examples': self._examples}], result)
 
+  def testResolveParameterSchema(self):
+    parameters = pipeline_pb2.NodeParameters()
+    text_format.Parse(
+        """
+        parameters {
+          key: 'key_one'
+          value {
+            field_value {string_value: 'value_one'}
+            schema {
+              value_type {
+                boolean_type: True
+              }
+            }
+          }
+        }
+        parameters {
+          key: 'key_two'
+          value {
+            field_value {int_value: 2}
+          }
+        }""", parameters)
+    expected_schema = """
+        value_type {
+          boolean_type: True
+        }
+    """
+    parameter_schemas = inputs_utils.resolve_parameter_schemas(parameters)
+    self.assertEqual(len(parameter_schemas), 1)
+    self.assertProtoPartiallyEquals(expected_schema,
+                                    parameter_schemas['key_one'])
+
 
 def unprocessed_artifacts_resolvers_available():
   try:

@@ -100,6 +100,8 @@ class ExecNodeTask(Task):
     execution_id: Id of the MLMD execution associated with the current node.
     contexts: List of contexts associated with the execution.
     exec_properties: Execution properties of the execution.
+    exec_properties_schema: Schema of execution properties to be used for
+      parsing non-primitive types.
     input_artifacts: Input artifacts dict.
     output_artifacts: Output artifacts dict.
     executor_output_uri: URI for the executor output.
@@ -113,6 +115,7 @@ class ExecNodeTask(Task):
   execution_id: int
   contexts: List[metadata_store_pb2.Context]
   exec_properties: Dict[str, types.Property]
+  exec_properties_schema: Dict[str, pipeline_pb2.Value.Schema]
   input_artifacts: Dict[str, List[types.Artifact]]
   output_artifacts: Dict[str, List[types.Artifact]]
   executor_output_uri: str

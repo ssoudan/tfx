@@ -187,6 +187,8 @@ class ComponentSpec(json_utils.Jsonable):
     inputs = {}
     outputs = {}
     self.exec_properties = {}
+    # Set exec_property_types if the parameter is a (list of) pb message.
+    self.exec_property_types = {}
 
     # First, check that the arguments are set.
     for arg_name, arg in itertools.chain(self.PARAMETERS.items(),
@@ -214,13 +216,28 @@ class ComponentSpec(json_utils.Jsonable):
 
       if (inspect.isclass(arg.type) and
           issubclass(arg.type, message.Message) and value and
-          not isinstance(value, str) and not _is_runtime_param(value)):
+          not _is_runtime_param(value)):
+        self.exec_property_types[arg_name] = arg.type
         # Create deterministic json string as it will be stored in metadata for
         # cache check.
-        if isinstance(value, dict):
+        if isinstance(value, str):
+          pass
+        elif isinstance(value, dict):
           value = json_utils.dumps(value)
         else:
           value = proto_utils.proto_to_json(value)
+      elif arg.type.__class__.__name__ in (
+          '_GenericAlias',
+          'GenericMeta') and arg.type.__origin__ in [List, list]:
+        self.exec_property_types[arg_name] = arg.type
+        list_value_type = arg.type.__args__[0]
+        if issubclass(list_value_type, message.Message) and value:
+          json_value = [proto_utils.proto_to_json(val) for val in value]
+          value = json_utils.dumps(json_value)
+        else:
+          value = json_utils.dumps(value)
+      elif arg.type == bool:
+        value = json_utils.dumps(value)
 
       self.exec_properties[arg_name] = value
 
@@ -241,6 +258,7 @@ class ComponentSpec(json_utils.Jsonable):
         'inputs': self.inputs,
         'outputs': self.outputs,
         'exec_properties': self.exec_properties,
+        'exec_property_types': self.exec_property_types,
     }
 
 

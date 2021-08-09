@@ -256,6 +256,7 @@ class Compiler:
 
     # Step 5: Node parameters
     if not compiler_utils.is_resolver(tfx_node):
+      exec_property_types = tfx_node.exec_property_types
       for key, value in tfx_node.exec_properties.items():
         if value is None:
           continue
@@ -268,8 +269,9 @@ class Compiler:
               value.default)
         else:
           try:
-            data_types_utils.set_metadata_value(parameter_value.field_value,
-                                                value)
+            data_types_utils.set_parameter_value(
+                parameter_value, value, exec_property_types[key]
+                if key in exec_property_types else None)
           except ValueError:
             raise ValueError(
                 "Component {} got unsupported parameter {} with type {}."

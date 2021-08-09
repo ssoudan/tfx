@@ -174,6 +174,10 @@ class BaseComponent(base_node.BaseNode, abc.ABC):
   def exec_properties(self) -> Dict[str, Any]:  # pylint: disable=g-missing-from-attributes
     return self.spec.exec_properties
 
+  @property
+  def exec_property_types(self) -> Dict[str, Any]:
+    return self.spec.exec_property_types
+
   def _add_pip_dependency(
       self, dependency: Union[str, '_PipDependencyFuture']) -> None:
     """Internal use only: add pip dependency to current component."""

@@ -16,6 +16,7 @@ syntax = "proto3";
 package tfx.orchestration;
 
 import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
 import "ml_metadata/proto/metadata_store.proto";
 
 // ResolverConfig is subject to change. We plan to introduce a flexible
@@ -100,6 +101,30 @@ message Value {
     RuntimeParameter runtime_parameter = 2;
     StructuralRuntimeParameter structural_runtime_parameter = 3;
   }
+
+  // Non-primitive types are JSON serialized and stored as string value in
+  // ml_metadata.Value. Proto schema and container type are provided to
+  // deserialize the string and recover type information.
+  message Schema {
+    enum ContainerType {
+      TYPE_UNSPECIFIED = 0;
+      LIST = 1;
+    }
+    message ProtoMetadata {
+      string message_type = 1;
+      google.protobuf.FileDescriptorSet file_descriptors = 2;
+    }
+    message ValueType {
+      oneof type {
+        ProtoMetadata proto_metadata = 2;
+        bool boolean_type = 3;
+      }
+    }
+
+    ContainerType container_type = 1;
+    ValueType value_type = 2;
+  }
+  Schema schema = 4;
 }
 
 // Definition of a predicate on property values. It can be one of the following:
