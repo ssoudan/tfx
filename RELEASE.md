@@ -21,6 +21,8 @@
 *  Added RuntimeParam support for Trainer's custom_config.
 *  TFX Trainer and Pusher now support Vertex, which can be enabled with
    `ENABLE_VERTEX_KEY` key in `custom_config`.
+*  Add support for `PlaceholderExpression` in `Value` (so for example,
+   Execution parameters can now be Placeholders).
 
 ## Breaking Changes
 
