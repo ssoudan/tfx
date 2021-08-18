@@ -14,7 +14,7 @@
 """TaskGenerator implementation for async pipelines."""
 
 import itertools
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Set
 
 from absl import logging
 from tfx.orchestration import metadata
@@ -41,10 +41,12 @@ class AsyncPipelineTaskGenerator(task_gen.TaskGenerator):
   where the instances refer to the same MLMD db and the same pipeline IR.
   """
 
-  def __init__(self, mlmd_handle: metadata.Metadata,
+  def __init__(self,
+               mlmd_handle: metadata.Metadata,
                pipeline_state: pstate.PipelineState,
                is_task_id_tracked_fn: Callable[[task_lib.TaskId], bool],
-               service_job_manager: service_jobs.ServiceJobManager):
+               service_job_manager: service_jobs.ServiceJobManager,
+               ignore_node_ids: Optional[Set[str]] = None):
     """Constructs `AsyncPipelineTaskGenerator`.
 
     Args:
@@ -53,6 +55,7 @@ class AsyncPipelineTaskGenerator(task_gen.TaskGenerator):
       is_task_id_tracked_fn: A callable that returns `True` if a task_id is
         tracked by the task queue.
       service_job_manager: Used for handling service nodes in the pipeline.
+      ignore_node_ids: Set of node ids of nodes to ignore for task generation.
     """
     self._mlmd_handle = mlmd_handle
     pipeline = pipeline_state.pipeline
@@ -71,6 +74,7 @@ class AsyncPipelineTaskGenerator(task_gen.TaskGenerator):
     self._pipeline = pipeline
     self._is_task_id_tracked_fn = is_task_id_tracked_fn
     self._service_job_manager = service_job_manager
+    self._ignore_node_ids = ignore_node_ids or set()
 
   def generate(self) -> List[task_lib.Task]:
     """Generates tasks for all executable nodes in the async pipeline.
@@ -85,14 +89,9 @@ class AsyncPipelineTaskGenerator(task_gen.TaskGenerator):
     for node in [n.pipeline_node for n in self._pipeline.nodes]:
       node_uid = task_lib.NodeUid.from_pipeline_node(self._pipeline, node)
       node_id = node.node_info.id
-
-      with self._pipeline_state:
-        node_state = self._pipeline_state.get_node_state(node_uid)
-        if node_state.state in (pstate.NodeState.STOPPING,
-                                pstate.NodeState.STOPPED):
-          logging.info('Ignoring node in state \'%s\' for task generation: %s',
-                       node_state.state, node_uid)
-          continue
+      if node_id in self._ignore_node_ids:
+        logging.info('Ignoring node for task generation: %s', node_uid)
+        continue
 
       # If this is a pure service node, there is no ExecNodeTask to generate
       # but we ensure node services and check service status.

@@ -98,6 +98,7 @@ class ImporterTaskSchedulerTest(test_utils.TfxTest):
       [artifact] = m.store.get_artifacts_by_type('Schema')
       self.assertProtoPartiallyEquals(
           """
+          id: 1
           uri: "my_url"
           custom_properties {
             key: "int_custom_property"
@@ -120,7 +121,7 @@ class ImporterTaskSchedulerTest(test_utils.TfxTest):
           state: LIVE""",
           artifact,
           ignored_fields=[
-              'id', 'type_id', 'create_time_since_epoch',
+              'type_id', 'create_time_since_epoch',
               'last_update_time_since_epoch'
           ])
 
@@ -128,6 +129,7 @@ class ImporterTaskSchedulerTest(test_utils.TfxTest):
       ] = m.store.get_executions_by_id([self._importer_task.execution_id])
       self.assertProtoPartiallyEquals(
           """
+          id: 1
           last_known_state: COMPLETE
           custom_properties {
             key: "artifact_uri"
@@ -144,7 +146,7 @@ class ImporterTaskSchedulerTest(test_utils.TfxTest):
           """,
           execution,
           ignored_fields=[
-              'id', 'type_id', 'create_time_since_epoch',
+              'type_id', 'create_time_since_epoch',
               'last_update_time_since_epoch'
           ])
 
