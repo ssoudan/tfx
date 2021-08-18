@@ -23,4 +23,4 @@ latter two packages.
 
 See `package_build/README.md` for packaging details.
 """
-PACKAGE_NAME = 'tfx'
+PACKAGE_NAME = 'tfx-dev'

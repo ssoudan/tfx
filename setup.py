@@ -190,7 +190,7 @@ with open('README.md') as fp:
 with open('README.ml-pipelines-sdk.md') as fp:
   _PIPELINES_SDK_LONG_DESCRIPTION = fp.read()
 
-package_name = package_config.PACKAGE_NAME
+package_name = 'tfx' # package_config.PACKAGE_NAME
 tfx_extras_requires = {
     # In order to use 'docker-image' or 'all', system libraries specified
     # under 'tfx/tools/docker/Dockerfile' are required
